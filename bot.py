@@ -1,5 +1,6 @@
 import os
 import json
+import calendar
 from datetime import datetime, timezone
 from urllib.parse import urlparse
 
@@ -47,6 +48,13 @@ def local_now():
     except Exception:
         return datetime.now(timezone.utc).astimezone()
 
+def entry_ts(entry):
+    if getattr(entry, "published_parsed", None):
+        return int(calendar.timegm(entry.published_parsed))
+    if getattr(entry, "updated_parsed", None):
+        return int(calendar.timegm(entry.updated_parsed))
+    return 0
+
 def build_message(items):
     now = local_now()
     header = f"🗞️ <b>IT Moldova</b>\n<i>Buletin {now:%d.%m.%Y %H:%M}</i>\n\n"
@@ -73,6 +81,64 @@ def send_message(text):
 def main():
     if not BOT_TOKEN or not CHAT_ID:
         raise RuntimeError("Missing BOT_TOKEN or CHAT_ID")
+
+    now = local_now()
+    if now.hour >= 22 or now.hour < 9:
+        print("Quiet hours, skip")
+        return
+
+    urls = load_rss_list()
+    state = load_state()
+    posted = set(state.get("posted_ids", []))
+
+    per_source_limit = int(os.getenv("PER_SOURCE_LIMIT", "2"))
+    collected = []
+
+    for u in urls:
+        feed = feedparser.parse(u)
+        source_count = 0
+
+        for e in feed.entries[:50]:
+            if source_count >= per_source_limit:
+                break
+
+            eid = entry_id(e)
+            if eid in posted:
+                continue
+
+            title = (e.get("title") or "").strip()
+            link = (e.get("link") or "").strip()
+            if not title or not link:
+                continue
+
+            ts = entry_ts(e)
+            collected.append({"id": eid, "title": title, "link": link, "ts": ts})
+            source_count += 1
+
+    if not collected:
+        print("No new items")
+        return
+
+    collected.sort(key=lambda x: x["ts"], reverse=True)
+    items = collected[:MAX_ITEMS]
+
+    msg = build_message(items)
+    if len(msg) > 3800:
+        msg = msg[:3800] + "\n…"
+
+    send_message(msg)
+
+    for it in items:
+        posted.add(it["id"])
+
+    state["posted_ids"] = list(posted)[-2000:]
+    save_state(state)
+
+    print(f"Posted {len(items)} items")
+
+if __name__ == "__main__":
+    main()
+```0        raise RuntimeError("Missing BOT_TOKEN or CHAT_ID")
 
     now = local_now()
     if now.hour >= 22 or now.hour < 9:
