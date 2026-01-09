@@ -1,0 +1,3 @@
+https://www.bleepingcomputer.com/feed/
+https://krebsonsecurity.com/feed/
+https://www.zdnet.com/rss.xml
