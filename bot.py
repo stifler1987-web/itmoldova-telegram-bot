@@ -16,7 +16,7 @@ TIMEZONE = os.getenv("TIMEZONE", "Europe/Chisinau")
 
 def load_rss_list():
     with open(RSS_FILE, "r", encoding="utf-8") as f:
-        return [line.strip() for line in f if line.strip()]
+        return [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
 
 def load_state():
     if not os.path.exists(STATE_FILE):
@@ -51,12 +51,11 @@ def build_message(items):
     now = local_now()
     header = f"🗞️ <b>IT Moldova</b>\n<i>Buletin {now:%d.%m.%Y %H:%M}</i>\n\n"
     blocks = []
-    for item in items:
-        title = html_escape(item["title"])
-        link = item.get("link", "")
-        src = domain_of(link)
-        line = f"• <a href=\"{link}\">{title}</a>\n<i>{src}</i>"
-        blocks.append(line)
+    for it in items:
+        title = html_escape(it["title"])
+        link = it["link"]
+        src = html_escape(domain_of(link))
+        blocks.append(f"• <a href=\"{link}\">{title}</a>\n<i>{src}</i>")
     return header + "\n\n".join(blocks)
 
 def send_message(text):
@@ -69,7 +68,7 @@ def send_message(text):
     }
     r = requests.post(url, json=payload, timeout=30)
     if not r.ok:
-        raise RuntimeError(r.text)
+        raise RuntimeError(f"{r.status_code}: {r.text}")
 
 def main():
     if not BOT_TOKEN or not CHAT_ID:
@@ -77,16 +76,16 @@ def main():
 
     now = local_now()
     if now.hour >= 22 or now.hour < 9:
-        print(f"Quiet hours {now:%H:%M}, skip posting")
+        print("Quiet hours, skip")
         return
 
-    rss_urls = load_rss_list()
+    urls = load_rss_list()
     state = load_state()
     posted = set(state.get("posted_ids", []))
     items = []
 
-    for url in rss_urls:
-        feed = feedparser.parse(url)
+    for u in urls:
+        feed = feedparser.parse(u)
         for e in feed.entries[:30]:
             eid = entry_id(e)
             if eid in posted:
@@ -103,7 +102,6 @@ def main():
 
     items = items[:MAX_ITEMS]
     msg = build_message(items)
-
     if len(msg) > 3800:
         msg = msg[:3800] + "\n…"
 
@@ -114,8 +112,6 @@ def main():
 
     state["posted_ids"] = list(posted)[-2000:]
     save_state(state)
-
-    print(f"Posted {len(items)} items")
 
 if __name__ == "__main__":
     main()
