@@ -1,3 +1,5 @@
-https://www.ipn.md/rss
-https://gov.md/rss
-https://www.mold-street.com/?rss
+https://www.bleepingcomputer.com/feed/
+https://krebsonsecurity.com/feed/
+https://www.darkreading.com/rss.xml
+https://www.securityweek.com/feed/
+https://www.zdnet.com/topic/security/rss.xml
