@@ -14,10 +14,11 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 MAX_ITEMS = int(os.getenv("MAX_ITEMS", "10"))
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Chisinau")
+PER_SOURCE_LIMIT = int(os.getenv("PER_SOURCE_LIMIT", "2"))
 
 def load_rss_list():
     with open(RSS_FILE, "r", encoding="utf-8") as f:
-        return [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
+        return [line.strip() for line in f if line.strip() and not line.startswith("#")]
 
 def load_state():
     if not os.path.exists(STATE_FILE):
@@ -30,7 +31,11 @@ def save_state(state):
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 def entry_id(entry):
-    return (entry.get("id") or entry.get("guid") or (entry.get("link", "") + "|" + entry.get("title", "")))[:500]
+    return (
+        entry.get("id")
+        or entry.get("guid")
+        or (entry.get("link", "") + "|" + entry.get("title", ""))
+    )[:500]
 
 def html_escape(s):
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -84,22 +89,19 @@ def main():
 
     now = local_now()
     if now.hour >= 22 or now.hour < 9:
-        print("Quiet hours, skip")
         return
 
     urls = load_rss_list()
     state = load_state()
     posted = set(state.get("posted_ids", []))
-
-    per_source_limit = int(os.getenv("PER_SOURCE_LIMIT", "2"))
     collected = []
 
     for u in urls:
         feed = feedparser.parse(u)
-        source_count = 0
+        taken = 0
 
         for e in feed.entries[:50]:
-            if source_count >= per_source_limit:
+            if taken >= PER_SOURCE_LIMIT:
                 break
 
             eid = entry_id(e)
@@ -111,67 +113,25 @@ def main():
             if not title or not link:
                 continue
 
-            ts = entry_ts(e)
-            collected.append({"id": eid, "title": title, "link": link, "ts": ts})
-            source_count += 1
+            collected.append({
+                "id": eid,
+                "title": title,
+                "link": link,
+                "ts": entry_ts(e)
+            })
+            taken += 1
 
     if not collected:
-        print("No new items")
         return
 
     collected.sort(key=lambda x: x["ts"], reverse=True)
     items = collected[:MAX_ITEMS]
 
-    msg = build_message(items)
-    if len(msg) > 3800:
-        msg = msg[:3800] + "\n…"
+    message = build_message(items)
+    if len(message) > 3800:
+        message = message[:3800] + "\n…"
 
-    send_message(msg)
-
-    for it in items:
-        posted.add(it["id"])
-
-    state["posted_ids"] = list(posted)[-2000:]
-    save_state(state)
-
-    print(f"Posted {len(items)} items")
-
-if __name__ == "__main__":
-    main()
-```0        raise RuntimeError("Missing BOT_TOKEN or CHAT_ID")
-
-    now = local_now()
-    if now.hour >= 22 or now.hour < 9:
-        print("Quiet hours, skip")
-        return
-
-    urls = load_rss_list()
-    state = load_state()
-    posted = set(state.get("posted_ids", []))
-    items = []
-
-    for u in urls:
-        feed = feedparser.parse(u)
-        for e in feed.entries[:30]:
-            eid = entry_id(e)
-            if eid in posted:
-                continue
-            title = (e.get("title") or "").strip()
-            link = (e.get("link") or "").strip()
-            if not title or not link:
-                continue
-            items.append({"id": eid, "title": title, "link": link})
-
-    if not items:
-        print("No new items")
-        return
-
-    items = items[:MAX_ITEMS]
-    msg = build_message(items)
-    if len(msg) > 3800:
-        msg = msg[:3800] + "\n…"
-
-    send_message(msg)
+    send_message(message)
 
     for it in items:
         posted.add(it["id"])
