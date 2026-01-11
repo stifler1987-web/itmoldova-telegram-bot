@@ -14,9 +14,9 @@ RULES_FILE = "emoji_rules.json"
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-MAX_ITEMS = int(os.getenv("MAX_ITEMS", "10"))
+MAX_ITEMS = int(os.getenv("MAX_ITEMS", "25"))
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Chisinau")
-PER_SOURCE_LIMIT = int(os.getenv("PER_SOURCE_LIMIT", "2"))
+PER_SOURCE_LIMIT = int(os.getenv("PER_SOURCE_LIMIT", "5"))
 
 # -------------------------
 # Routing rules (simple keywords -> target category)
