@@ -18,6 +18,9 @@ MAX_ITEMS = int(os.getenv("MAX_ITEMS", "25"))
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Chisinau")
 PER_SOURCE_LIMIT = int(os.getenv("PER_SOURCE_LIMIT", "5"))
 
+# ✅ Only include items newer than this many hours (default 24)
+MAX_AGE_HOURS = int(os.getenv("MAX_AGE_HOURS", "24"))
+
 # -------------------------
 # Routing rules (simple keywords -> target category)
 # Adjust keywords anytime.
@@ -197,6 +200,13 @@ def fits_telegram_html(msg: str) -> bool:
     return len(msg.encode("utf-8", errors="ignore")) <= 3800
 
 
+def cutoff_ts():
+    # timestamp in seconds: now - MAX_AGE_HOURS
+    now = local_now()
+    now_utc = now.astimezone(timezone.utc)
+    return int(now_utc.timestamp()) - (MAX_AGE_HOURS * 3600)
+
+
 # =========================
 # OUTPUT
 # =========================
@@ -229,7 +239,7 @@ def build_message(grouped_items, default_emoji, rules):
 
             src = html_escape_text(domain_of(raw_link))
 
-            # ✅ SPATIU INTRE STIRI (rând gol)
+            # ✅ space between items
             lines.append(f'{emoji} <a href="{link}">{title}</a>\n<i>{src}</i>\n')
 
         sections.append("\n".join(lines))
@@ -271,11 +281,12 @@ def main():
         return
 
     known_categories = {c["name"] for c in categories}
-
     default_emoji, rules = load_emoji_rules()
 
     state = load_state()
     posted = set(state.get("posted_ids", []))
+
+    cutoff = cutoff_ts()
 
     # Collect routed items globally, then regroup by target category
     routed_items = []
@@ -292,6 +303,13 @@ def main():
                 if taken >= PER_SOURCE_LIMIT:
                     break
 
+                ts = entry_ts(e)
+
+                # ✅ Keep only recent items (<= MAX_AGE_HOURS)
+                # Permissive mode: if ts == 0 (no timestamp), allow it through.
+                if ts and ts < cutoff:
+                    continue
+
                 eid = entry_id(e)
                 if eid in posted or eid in all_selected_ids:
                     continue
@@ -306,7 +324,7 @@ def main():
                         "id": eid,
                         "title": title,
                         "link": link,
-                        "ts": entry_ts(e),
+                        "ts": ts,
                         "source_category": cat["name"],
                     }
                 )
@@ -390,7 +408,6 @@ def main():
                 break
 
         if not fits_telegram_html(message):
-            # last resort: send header only
             now = local_now()
             message = f"🗞️ <b>IT Moldova</b>\n<i>Buletin {now:%d.%m.%Y %H:%M}</i>\n\n…"
 
