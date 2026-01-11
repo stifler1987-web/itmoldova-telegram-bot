@@ -161,8 +161,20 @@ def route_category(title, current_category, known_categories):
     return current_category
 
 
-def html_escape(s):
+def html_escape_text(s):
+    """Escape for text nodes (between tags)."""
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def html_escape_attr(s):
+    """Escape for attribute values, e.g. href="...". """
+    return (
+        (s or "")
+        .replace("&", "&amp;")
+        .replace('"', "&quot;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+    )
 
 
 def domain_of(url):
@@ -178,6 +190,11 @@ def local_now():
         return datetime.now(ZoneInfo(TIMEZONE))
     except Exception:
         return datetime.now(timezone.utc).astimezone()
+
+
+def fits_telegram_html(msg: str) -> bool:
+    # Telegram limit is 4096 chars, but safer to stay under ~3800 bytes (UTF-8)
+    return len(msg.encode("utf-8", errors="ignore")) <= 3800
 
 
 # =========================
@@ -199,16 +216,20 @@ def build_message(grouped_items, default_emoji, rules):
             continue
 
         lines = [
-            f"<b>{html_escape(cat_name)}</b>",
+            f"<b>{html_escape_text(cat_name)}</b>",
             "────────"
         ]
 
         for it in items[:limit]:
             emoji = detect_emoji(it["title"], default_emoji, rules)
-            title = html_escape(it["title"])
-            link = it["link"]
-            src = html_escape(domain_of(link))
-            lines.append(f"{emoji} <a href=\"{link}\">{title}</a>\n<i>{src}</i>")
+
+            title = html_escape_text(it["title"])
+            raw_link = it["link"]
+            link = html_escape_attr(raw_link)
+
+            src = html_escape_text(domain_of(raw_link))
+
+            lines.append(f'{emoji} <a href="{link}">{title}</a>\n<i>{src}</i>')
 
         sections.append("\n".join(lines))
 
@@ -225,7 +246,11 @@ def send_message(text):
     }
     r = requests.post(url, json=payload, timeout=30)
     if not r.ok:
-        raise RuntimeError(f"{r.status_code}: {r.text}")
+        # Fallback: resend as plain text (no HTML parsing) to avoid pipeline failure
+        payload.pop("parse_mode", None)
+        r2 = requests.post(url, json=payload, timeout=30)
+        if not r2.ok:
+            raise RuntimeError(f"{r.status_code}: {r.text}")
 
 
 # =========================
@@ -346,9 +371,28 @@ def main():
     if not kept:
         return
 
+    # Build message and ensure it fits Telegram without breaking HTML
     message = build_message(grouped_items, default_emoji, rules)
-    if len(message) > 3800:
-        message = message[:3800] + "\n…"
+    if not fits_telegram_html(message):
+        # reduce items from the end until it fits
+        for _ in range(300):
+            removed = False
+            for gi in reversed(grouped_items):
+                if gi["items"]:
+                    gi["items"].pop()
+                    removed = True
+                    break
+            if not removed:
+                break
+            message = build_message(grouped_items, default_emoji, rules)
+            if fits_telegram_html(message):
+                # also keep kept in sync (best effort)
+                break
+
+        if not fits_telegram_html(message):
+            # last resort: send header only
+            now = local_now()
+            message = f"🗞️ <b>IT Moldova</b>\n<i>Buletin {now:%d.%m.%Y %H:%M}</i>\n\n…"
 
     send_message(message)
 
