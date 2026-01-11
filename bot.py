@@ -16,6 +16,17 @@ MAX_ITEMS = int(os.getenv("MAX_ITEMS", "10"))
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Chisinau")
 PER_SOURCE_LIMIT = int(os.getenv("PER_SOURCE_LIMIT", "2"))
 
+EMOJI_RULES = [
+    ("🚨", ["critical", "zero-day", "0day", "actively exploited", "emergency"]),
+    ("🦠", ["ransomware", "malware", "trojan", "worm", "botnet"]),
+    ("🎣", ["phishing", "scam", "fraud", "spoof"]),
+    ("🔓", ["breach", "leak", "exposed", "data stolen"]),
+    ("🔐", ["password", "authentication", "auth", "login", "2fa", "passkey", "encryption"]),
+    ("🛠️", ["patch", "update", "fixed", "mitigation", "released"]),
+    ("🏢", ["microsoft", "google", "apple", "vmware", "cisco", "fortinet"]),
+    ("💻", ["windows", "linux", "server", "cloud", "vm", "infrastructure"]),
+]
+
 def load_rss_list():
     with open(RSS_FILE, "r", encoding="utf-8") as f:
         return [line.strip() for line in f if line.strip() and not line.startswith("#")]
@@ -37,6 +48,21 @@ def entry_id(entry):
         or (entry.get("link", "") + "|" + entry.get("title", ""))
     )[:500]
 
+def entry_ts(entry):
+    if getattr(entry, "published_parsed", None):
+        return int(calendar.timegm(entry.published_parsed))
+    if getattr(entry, "updated_parsed", None):
+        return int(calendar.timegm(entry.updated_parsed))
+    return 0
+
+def detect_emoji(title):
+    t = title.lower()
+    for emoji, keywords in EMOJI_RULES:
+        for kw in keywords:
+            if kw in t:
+                return emoji
+    return "📰"
+
 def html_escape(s):
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
@@ -53,22 +79,18 @@ def local_now():
     except Exception:
         return datetime.now(timezone.utc).astimezone()
 
-def entry_ts(entry):
-    if getattr(entry, "published_parsed", None):
-        return int(calendar.timegm(entry.published_parsed))
-    if getattr(entry, "updated_parsed", None):
-        return int(calendar.timegm(entry.updated_parsed))
-    return 0
-
 def build_message(items):
     now = local_now()
     header = f"🗞️ <b>IT Moldova</b>\n<i>Buletin {now:%d.%m.%Y %H:%M}</i>\n\n"
     blocks = []
+
     for it in items:
+        emoji = detect_emoji(it["title"])
         title = html_escape(it["title"])
         link = it["link"]
         src = html_escape(domain_of(link))
-        blocks.append(f"• <a href=\"{link}\">{title}</a>\n<i>{src}</i>")
+        blocks.append(f"{emoji} <a href=\"{link}\">{title}</a>\n<i>{src}</i>")
+
     return header + "\n\n".join(blocks)
 
 def send_message(text):
