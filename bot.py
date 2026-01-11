@@ -22,21 +22,32 @@ MAX_ITEMS = 25
 PER_SOURCE_LIMIT = 5
 TIMEZONE = "Europe/Chisinau"
 
-# ✅ 72h – RSS realistic
+# RSS realistic window
 MAX_AGE_HOURS = 72
 
 # -------------------------
-# Routing rules
+# Routing rules (CORECTATE)
 # -------------------------
 ROUTING_RULES = [
+    # 🛠️ strict: doar vulnerabilități reale
     {
-        "keywords": ["cve-", "zero-day", "0-day", "exploit", "poc"],
+        "keywords": ["cve-", "zero-day", "0-day", "exploit", "poc", "rce"],
         "target": "🛠️ Critical Vulnerabilities",
     },
+
+    # 🚨 policy / CISA / regulator → Breaking
     {
-        "keywords": ["phishing", "scam", "fraud", "spoof"],
+        "keywords": ["cisa", "directive", "policy", "sunsets", "regulator"],
         "target": "🚨 Breaking & Incidents",
     },
+
+    # 🚨 incidente generale
+    {
+        "keywords": ["phishing", "scam", "fraud", "spoof", "breach"],
+        "target": "🚨 Breaking & Incidents",
+    },
+
+    # 🧠 threat intel
     {
         "keywords": ["apt", "malware", "botnet", "campaign"],
         "target": "🧠 Threat Intelligence",
@@ -206,7 +217,10 @@ def main():
             if total >= MAX_ITEMS:
                 break
             emoji = detect_emoji(it["title"], default_emoji, emoji_rules)
-            message += f'{emoji} <a href="{html_escape(it["link"])}">{html_escape(it["title"])}</a>\n<i>{domain_of(it["link"])}</i>\n\n'
+            message += (
+                f'{emoji} <a href="{html_escape(it["link"])}">{html_escape(it["title"])}</a>\n'
+                f'<i>{domain_of(it["link"])}</i>\n\n'
+            )
             kept_ids.append(it["id"])
             total += 1
 
