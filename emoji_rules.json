@@ -1,12 +1,33 @@
 {
+  "default": "🛡️",
   "rules": [
-    { "keywords": ["ransomware", "extortion"], "emoji": "🔐" },
-    { "keywords": ["breach", "leak", "exposed"], "emoji": "🚨" },
-    { "keywords": ["zero-day", "0-day"], "emoji": "🧨" },
-    { "keywords": ["cve-", "vulnerability"], "emoji": "🛠️" },
-    { "keywords": ["phishing", "scam"], "emoji": "🎣" },
-    { "keywords": ["bank", "financial", "swift"], "emoji": "🏦" },
-    { "keywords": ["apt", "state-sponsored"], "emoji": "🕵️" }
-  ],
-  "default_emoji": "🛡️"
+    {
+      "keywords": ["ransomware", "extortion"],
+      "emoji": "🔐"
+    },
+    {
+      "keywords": ["breach", "leak", "exposed"],
+      "emoji": "🚨"
+    },
+    {
+      "keywords": ["zero-day", "0-day"],
+      "emoji": "🧨"
+    },
+    {
+      "keywords": ["cve-", "vulnerability"],
+      "emoji": "🛠️"
+    },
+    {
+      "keywords": ["phishing", "scam"],
+      "emoji": "🎣"
+    },
+    {
+      "keywords": ["bank", "financial", "swift"],
+      "emoji": "🏦"
+    },
+    {
+      "keywords": ["apt", "state-sponsored"],
+      "emoji": "🕵️"
+    }
+  ]
 }
