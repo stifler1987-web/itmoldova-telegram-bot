@@ -1,7 +1,7 @@
 {
   "categories": {
     "🚨 Breaking & Incidents": {
-      "limit": 3,
+      "limit": 5,
       "feeds": [
         "https://therecord.media/feed",
         "https://www.cyberscoop.com/feed/",
@@ -9,7 +9,7 @@
       ]
     },
     "🧠 Threat Intelligence": {
-      "limit": 2,
+      "limit": 5,
       "feeds": [
         "https://www.mandiant.com/resources/blog/rss.xml",
         "https://securelist.com/feed/",
@@ -17,7 +17,7 @@
       ]
     },
     "🛠️ Critical Vulnerabilities": {
-      "limit": 2,
+      "limit": 5,
       "feeds": [
         "https://www.cisa.gov/known-exploited-vulnerabilities-catalog.xml",
         "https://googleprojectzero.blogspot.com/feeds/posts/default",
@@ -25,14 +25,14 @@
       ]
     },
     "🧪 AppSec & Exploits": {
-      "limit": 2,
+      "limit": 5,
       "feeds": [
         "https://hackerone.com/hacktivity.rss",
         "https://portswigger.net/research/rss"
       ]
     },
     "🏦 Enterprise & Banking": {
-      "limit": 1,
+      "limit": 5,
       "feeds": [
         "https://www.bankinfosecurity.com/rss.php",
         "https://unit42.paloaltonetworks.com/feed/",
