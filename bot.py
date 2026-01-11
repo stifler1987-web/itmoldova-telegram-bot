@@ -20,6 +20,7 @@ PER_SOURCE_LIMIT = int(os.getenv("PER_SOURCE_LIMIT", "5"))
 
 # -------------------------
 # Routing rules (simple keywords -> target category)
+# Adjust keywords anytime.
 # -------------------------
 ROUTING_RULES = [
     {
@@ -36,11 +37,21 @@ ROUTING_RULES = [
     },
 ]
 
+
 # =========================
 # CONFIG LOADERS
 # =========================
 
 def load_feeds_config():
+    """
+    Supports your feeds.json format:
+    {
+      "categories": {
+        "Name": { "limit": X, "feeds": [...] },
+        ...
+      }
+    }
+    """
     with open(FEEDS_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
 
@@ -48,6 +59,7 @@ def load_feeds_config():
     cleaned = []
 
     if isinstance(cats, dict):
+        # dict preserves insertion order in Python 3.7+
         for name, cfg in cats.items():
             if not isinstance(cfg, dict):
                 continue
@@ -85,14 +97,20 @@ def load_emoji_rules():
             data = json.load(f)
 
         default = data.get("default", default)
-        for r in data.get("rules", []):
+        raw_rules = data.get("rules", [])
+
+        for r in raw_rules:
             emoji = r.get("emoji")
             keywords = r.get("keywords", [])
             if emoji and isinstance(keywords, list):
-                rules.append({
-                    "emoji": emoji,
-                    "keywords": [k.lower() for k in keywords if isinstance(k, str)]
-                })
+                rules.append(
+                    {
+                        "emoji": emoji,
+                        "keywords": [
+                            k.lower() for k in keywords if isinstance(k, str) and k.strip()
+                        ],
+                    }
+                )
     except Exception:
         pass
 
@@ -129,21 +147,27 @@ def detect_emoji(title, default, rules):
 
 
 def route_category(title, current_category, known_categories):
+    """
+    Simple routing: if title contains keywords, move to target category.
+    Only routes to categories that exist in feeds.json (known_categories).
+    """
     t = (title or "").lower()
     for rule in ROUTING_RULES:
         target = rule.get("target")
         if target and target in known_categories:
             for kw in rule.get("keywords", []):
-                if kw in t:
+                if kw and kw in t:
                     return target
     return current_category
 
 
 def html_escape_text(s):
+    """Escape for text nodes (between tags)."""
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 
 def html_escape_attr(s):
+    """Escape for attribute values, e.g. href="...". """
     return (
         (s or "")
         .replace("&", "&amp;")
@@ -168,7 +192,8 @@ def local_now():
         return datetime.now(timezone.utc).astimezone()
 
 
-def fits_telegram_html(msg):
+def fits_telegram_html(msg: str) -> bool:
+    # Telegram limit is 4096 chars, but safer to stay under ~3800 bytes (UTF-8)
     return len(msg.encode("utf-8", errors="ignore")) <= 3800
 
 
@@ -179,27 +204,33 @@ def fits_telegram_html(msg):
 def build_message(grouped_items, default_emoji, rules):
     now = local_now()
     header = f"🗞️ <b>IT Moldova</b>\n<i>Buletin {now:%d.%m.%Y %H:%M}</i>\n\n"
+
     sections = []
 
     for cat in grouped_items:
-        if not cat["items"]:
+        cat_name = cat["name"]
+        limit = cat["limit"]
+        items = cat["items"]
+
+        if not items:
             continue
 
         lines = [
-            f"<b>{html_escape_text(cat['name'])}</b>",
+            f"<b>{html_escape_text(cat_name)}</b>",
             "────────"
         ]
 
-        for it in cat["items"]:
+        for it in items[:limit]:
             emoji = detect_emoji(it["title"], default_emoji, rules)
-            title = html_escape_text(it["title"])
-            link = html_escape_attr(it["link"])
-            src = html_escape_text(domain_of(it["link"]))
 
-            # ⭐ SPATIU INTRE STIRI
-            lines.append(
-                f'{emoji} <a href="{link}">{title}</a>\n<i>{src}</i>\n'
-            )
+            title = html_escape_text(it["title"])
+            raw_link = it["link"]
+            link = html_escape_attr(raw_link)
+
+            src = html_escape_text(domain_of(raw_link))
+
+            # ✅ SPATIU INTRE STIRI (rând gol)
+            lines.append(f'{emoji} <a href="{link}">{title}</a>\n<i>{src}</i>\n')
 
         sections.append("\n".join(lines))
 
@@ -214,9 +245,9 @@ def send_message(text):
         "parse_mode": "HTML",
         "disable_web_page_preview": True,
     }
-
     r = requests.post(url, json=payload, timeout=30)
     if not r.ok:
+        # Fallback: resend as plain text (no HTML parsing) to avoid pipeline failure
         payload.pop("parse_mode", None)
         r2 = requests.post(url, json=payload, timeout=30)
         if not r2.ok:
@@ -236,12 +267,17 @@ def main():
         return
 
     categories = load_feeds_config()
+    if not categories:
+        return
+
     known_categories = {c["name"] for c in categories}
 
     default_emoji, rules = load_emoji_rules()
+
     state = load_state()
     posted = set(state.get("posted_ids", []))
 
+    # Collect routed items globally, then regroup by target category
     routed_items = []
     all_selected_ids = set()
 
@@ -265,17 +301,26 @@ def main():
                 if not title or not link:
                     continue
 
-                candidates.append({
-                    "id": eid,
-                    "title": title,
-                    "link": link,
-                    "ts": entry_ts(e),
-                    "source_category": cat["name"],
-                })
+                candidates.append(
+                    {
+                        "id": eid,
+                        "title": title,
+                        "link": link,
+                        "ts": entry_ts(e),
+                        "source_category": cat["name"],
+                    }
+                )
                 taken += 1
 
+        if not candidates:
+            continue
+
         candidates.sort(key=lambda x: x["ts"], reverse=True)
-        for it in candidates[:cat["limit"]]:
+
+        # Take up to category limit from this category's feeds (before routing)
+        selected = candidates[: cat["limit"]]
+
+        for it in selected:
             it["category"] = route_category(it["title"], it["source_category"], known_categories)
             routed_items.append(it)
             all_selected_ids.add(it["id"])
@@ -283,30 +328,71 @@ def main():
     if not routed_items:
         return
 
-    cat_map = {c["name"]: {"name": c["name"], "items": []} for c in categories}
+    # Regroup by routed category, keep category order from feeds.json
+    cat_map = {c["name"]: {"name": c["name"], "limit": c["limit"], "items": []} for c in categories}
     for it in routed_items:
-        cat_map[it["category"]]["items"].append(it)
+        target = it.get("category") or it.get("source_category")
+        if target not in cat_map:
+            target = it.get("source_category")
+        cat_map[target]["items"].append(it)
 
+    # Sort items inside each category by time desc
+    for c in categories:
+        cat_map[c["name"]]["items"].sort(key=lambda x: x.get("ts", 0), reverse=True)
+
+    # Enforce MAX_ITEMS globally while preserving category order and per-category limits
     grouped_items = []
     total = 0
     kept = []
 
     for c in categories:
-        items = []
-        for it in sorted(cat_map[c["name"]], key=lambda x: x["ts"], reverse=True):
+        name = c["name"]
+        limit = c["limit"]
+        items = cat_map[name]["items"]
+
+        if not items:
+            grouped_items.append({"name": name, "limit": limit, "items": []})
+            continue
+
+        allowed = []
+        for it in items:
             if total >= MAX_ITEMS:
                 break
-            items.append(it)
+            if len(allowed) >= limit:
+                break
+            allowed.append(it)
             kept.append(it)
             total += 1
-        grouped_items.append({"name": c["name"], "items": items})
+
+        grouped_items.append({"name": name, "limit": limit, "items": allowed})
+
+        if total >= MAX_ITEMS:
+            break
 
     if not kept:
         return
 
+    # Build message and ensure it fits Telegram without breaking HTML
     message = build_message(grouped_items, default_emoji, rules)
     if not fits_telegram_html(message):
-        return
+        # reduce items from the end until it fits
+        for _ in range(300):
+            removed = False
+            for gi in reversed(grouped_items):
+                if gi["items"]:
+                    gi["items"].pop()
+                    removed = True
+                    break
+            if not removed:
+                break
+            message = build_message(grouped_items, default_emoji, rules)
+            if fits_telegram_html(message):
+                break
+
+        if not fits_telegram_html(message):
+            # last resort: send header only
+            now = local_now()
+            message = f"🗞️ <b>IT Moldova</b>\n<i>Buletin {now:%d.%m.%Y %H:%M}</i>\n\n…"
 
     send_message(message)
 
