@@ -1,0 +1,43 @@
+{
+  "categories": {
+    "🚨 Breaking & Incidents": {
+      "limit": 3,
+      "feeds": [
+        "https://therecord.media/feed",
+        "https://www.cyberscoop.com/feed/",
+        "https://www.scmagazine.com/feed"
+      ]
+    },
+    "🧠 Threat Intelligence": {
+      "limit": 2,
+      "feeds": [
+        "https://www.mandiant.com/resources/blog/rss.xml",
+        "https://securelist.com/feed/",
+        "https://www.welivesecurity.com/feed/"
+      ]
+    },
+    "🛠️ Critical Vulnerabilities": {
+      "limit": 2,
+      "feeds": [
+        "https://www.cisa.gov/known-exploited-vulnerabilities-catalog.xml",
+        "https://googleprojectzero.blogspot.com/feeds/posts/default",
+        "https://www.zerodayinitiative.com/rss.xml"
+      ]
+    },
+    "🧪 AppSec & Exploits": {
+      "limit": 2,
+      "feeds": [
+        "https://hackerone.com/hacktivity.rss",
+        "https://portswigger.net/research/rss"
+      ]
+    },
+    "🏦 Enterprise & Banking": {
+      "limit": 1,
+      "feeds": [
+        "https://www.bankinfosecurity.com/rss.php",
+        "https://unit42.paloaltonetworks.com/feed/",
+        "https://www.microsoft.com/security/blog/feed/"
+      ]
+    }
+  }
+}
