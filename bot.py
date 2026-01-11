@@ -14,31 +14,44 @@ RULES_FILE = "emoji_rules.json"
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 
-# MAX total items in bulletin (all categories combined)
 MAX_ITEMS = int(os.getenv("MAX_ITEMS", "10"))
-
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Chisinau")
-
-# How many items to take from each feed at most (before category limiting)
 PER_SOURCE_LIMIT = int(os.getenv("PER_SOURCE_LIMIT", "2"))
 
+
+# =========================
+# CONFIG LOADERS
+# =========================
 
 def load_feeds_config():
     with open(FEEDS_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    cats = data.get("categories", [])
+    cats = data.get("categories", {})
     cleaned = []
-    for c in cats:
-        name = (c.get("name") or "").strip()
-        limit = int(c.get("limit") or 0)
-        feeds = c.get("feeds") or []
-        feeds = [x.strip() for x in feeds if isinstance(x, str) and x.strip()]
 
-        if not name or limit <= 0 or not feeds:
-            continue
+    # EXPECTED FORMAT:
+    # "categories": {
+    #   "Category Name": { "limit": X, "feeds": [...] }
+    # }
+    if isinstance(cats, dict):
+        for name, cfg in cats.items():
+            if not isinstance(cfg, dict):
+                continue
 
-        cleaned.append({"name": name, "limit": limit, "feeds": feeds})
+            cat_name = (name or "").strip()
+            limit = int(cfg.get("limit") or 0)
+            feeds = cfg.get("feeds") or []
+            feeds = [x.strip() for x in feeds if isinstance(x, str) and x.strip()]
+
+            if not cat_name or limit <= 0 or not feeds:
+                continue
+
+            cleaned.append({
+                "name": cat_name,
+                "limit": limit,
+                "feeds": feeds
+            })
 
     return cleaned
 
@@ -54,6 +67,34 @@ def save_state(state):
     with open(STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(state, f, ensure_ascii=False, indent=2)
 
+
+def load_emoji_rules():
+    default = "📰"
+    rules = []
+    try:
+        with open(RULES_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+
+        default = data.get("default", default)
+        raw_rules = data.get("rules", [])
+
+        for r in raw_rules:
+            emoji = r.get("emoji")
+            keywords = r.get("keywords", [])
+            if emoji and isinstance(keywords, list):
+                rules.append({
+                    "emoji": emoji,
+                    "keywords": [k.lower() for k in keywords if isinstance(k, str) and k.strip()]
+                })
+    except Exception:
+        pass
+
+    return default, rules
+
+
+# =========================
+# HELPERS
+# =========================
 
 def entry_id(entry):
     return (
@@ -71,40 +112,12 @@ def entry_ts(entry):
     return 0
 
 
-def load_emoji_rules():
-    default = "📰"
-    rules = []
-    try:
-        with open(RULES_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        default = data.get("default", default)
-        rules = data.get("rules", [])
-        clean_rules = []
-        for r in rules:
-            emoji = r.get("emoji")
-            keywords = r.get("keywords", [])
-            if not emoji or not isinstance(keywords, list):
-                continue
-            clean_rules.append(
-                {
-                    "emoji": emoji,
-                    "keywords": [
-                        k.lower() for k in keywords if isinstance(k, str) and k.strip()
-                    ],
-                }
-            )
-        return default, clean_rules
-    except Exception:
-        return default, rules
-
-
 def detect_emoji(title, default, rules):
     t = (title or "").lower()
     for r in rules:
-        emoji = r["emoji"]
         for kw in r["keywords"]:
-            if kw and kw in t:
-                return emoji
+            if kw in t:
+                return r["emoji"]
     return default
 
 
@@ -122,11 +135,14 @@ def domain_of(url):
 def local_now():
     try:
         from zoneinfo import ZoneInfo
-
         return datetime.now(ZoneInfo(TIMEZONE))
     except Exception:
         return datetime.now(timezone.utc).astimezone()
 
+
+# =========================
+# OUTPUT
+# =========================
 
 def build_message(grouped_items, default_emoji, rules):
     now = local_now()
@@ -156,12 +172,16 @@ def send_message(text):
         "chat_id": CHAT_ID,
         "text": text,
         "parse_mode": "HTML",
-        "disable_web_page_preview": True,
+        "disable_web_page_preview": True
     }
     r = requests.post(url, json=payload, timeout=30)
     if not r.ok:
         raise RuntimeError(f"{r.status_code}: {r.text}")
 
+
+# =========================
+# MAIN
+# =========================
 
 def main():
     if not BOT_TOKEN or not CHAT_ID:
@@ -176,7 +196,6 @@ def main():
         return
 
     default_emoji, rules = load_emoji_rules()
-
     state = load_state()
     posted = set(state.get("posted_ids", []))
 
@@ -184,14 +203,13 @@ def main():
     all_selected = []
     all_selected_ids = set()
 
-    # collect per category
     for cat in categories:
-        cat_candidates = []
+        candidates = []
 
         for feed_url in cat["feeds"]:
             feed = feedparser.parse(feed_url)
-
             taken = 0
+
             for e in feed.entries[:50]:
                 if taken >= PER_SOURCE_LIMIT:
                     break
@@ -205,23 +223,20 @@ def main():
                 if not title or not link:
                     continue
 
-                cat_candidates.append(
-                    {
-                        "id": eid,
-                        "title": title,
-                        "link": link,
-                        "ts": entry_ts(e),
-                    }
-                )
+                candidates.append({
+                    "id": eid,
+                    "title": title,
+                    "link": link,
+                    "ts": entry_ts(e)
+                })
                 taken += 1
 
-        # ✅ FIX: this block must be indented
-        if not cat_candidates:
+        if not candidates:
             grouped_items.append((cat["name"], []))
             continue
 
-        cat_candidates.sort(key=lambda x: x["ts"], reverse=True)
-        selected = cat_candidates[: cat["limit"]]
+        candidates.sort(key=lambda x: x["ts"], reverse=True)
+        selected = candidates[:cat["limit"]]
 
         for it in selected:
             all_selected.append(it)
@@ -231,30 +246,6 @@ def main():
 
     if not all_selected:
         return
-
-    # Enforce MAX_ITEMS across all categories (keeps category order)
-    if len(all_selected) > MAX_ITEMS:
-        kept_ids = set()
-        trimmed_grouped = []
-        count = 0
-
-        for cat_name, items in grouped_items:
-            new_items = []
-            for it in items:
-                if count >= MAX_ITEMS:
-                    break
-                if it["id"] in kept_ids:
-                    continue
-                new_items.append(it)
-                kept_ids.add(it["id"])
-                count += 1
-
-            trimmed_grouped.append((cat_name, new_items))
-            if count >= MAX_ITEMS:
-                break
-
-        grouped_items = trimmed_grouped
-        all_selected = [it for _, items in grouped_items for it in items]
 
     message = build_message(grouped_items, default_emoji, rules)
     if len(message) > 3800:
