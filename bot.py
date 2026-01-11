@@ -9,23 +9,13 @@ import requests
 
 RSS_FILE = "rss_list.txt"
 STATE_FILE = "state.json"
+RULES_FILE = "emoji_rules.json"
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 CHAT_ID = os.getenv("CHAT_ID")
 MAX_ITEMS = int(os.getenv("MAX_ITEMS", "10"))
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Chisinau")
 PER_SOURCE_LIMIT = int(os.getenv("PER_SOURCE_LIMIT", "2"))
-
-EMOJI_RULES = [
-    ("🚨", ["critical", "zero-day", "0day", "actively exploited", "emergency"]),
-    ("🦠", ["ransomware", "malware", "trojan", "worm", "botnet"]),
-    ("🎣", ["phishing", "scam", "fraud", "spoof"]),
-    ("🔓", ["breach", "leak", "exposed", "data stolen"]),
-    ("🔐", ["password", "authentication", "auth", "login", "2fa", "passkey", "encryption"]),
-    ("🛠️", ["patch", "update", "fixed", "mitigation", "released"]),
-    ("🏢", ["microsoft", "google", "apple", "vmware", "cisco", "fortinet"]),
-    ("💻", ["windows", "linux", "server", "cloud", "vm", "infrastructure"]),
-]
 
 def load_rss_list():
     with open(RSS_FILE, "r", encoding="utf-8") as f:
@@ -55,13 +45,33 @@ def entry_ts(entry):
         return int(calendar.timegm(entry.updated_parsed))
     return 0
 
-def detect_emoji(title):
-    t = title.lower()
-    for emoji, keywords in EMOJI_RULES:
-        for kw in keywords:
-            if kw in t:
+def load_emoji_rules():
+    default = "📰"
+    rules = []
+    try:
+        with open(RULES_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        default = data.get("default", default)
+        rules = data.get("rules", [])
+        clean_rules = []
+        for r in rules:
+            emoji = r.get("emoji")
+            keywords = r.get("keywords", [])
+            if not emoji or not isinstance(keywords, list):
+                continue
+            clean_rules.append({"emoji": emoji, "keywords": [k.lower() for k in keywords if isinstance(k, str) and k.strip()]})
+        return default, clean_rules
+    except Exception:
+        return default, rules
+
+def detect_emoji(title, default, rules):
+    t = (title or "").lower()
+    for r in rules:
+        emoji = r["emoji"]
+        for kw in r["keywords"]:
+            if kw and kw in t:
                 return emoji
-    return "📰"
+    return default
 
 def html_escape(s):
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
@@ -79,18 +89,16 @@ def local_now():
     except Exception:
         return datetime.now(timezone.utc).astimezone()
 
-def build_message(items):
+def build_message(items, default_emoji, rules):
     now = local_now()
     header = f"🗞️ <b>IT Moldova</b>\n<i>Buletin {now:%d.%m.%Y %H:%M}</i>\n\n"
     blocks = []
-
     for it in items:
-        emoji = detect_emoji(it["title"])
+        emoji = detect_emoji(it["title"], default_emoji, rules)
         title = html_escape(it["title"])
         link = it["link"]
         src = html_escape(domain_of(link))
         blocks.append(f"{emoji} <a href=\"{link}\">{title}</a>\n<i>{src}</i>")
-
     return header + "\n\n".join(blocks)
 
 def send_message(text):
@@ -113,6 +121,8 @@ def main():
     if now.hour >= 22 or now.hour < 9:
         return
 
+    default_emoji, rules = load_emoji_rules()
+
     urls = load_rss_list()
     state = load_state()
     posted = set(state.get("posted_ids", []))
@@ -121,7 +131,6 @@ def main():
     for u in urls:
         feed = feedparser.parse(u)
         taken = 0
-
         for e in feed.entries[:50]:
             if taken >= PER_SOURCE_LIMIT:
                 break
@@ -149,7 +158,7 @@ def main():
     collected.sort(key=lambda x: x["ts"], reverse=True)
     items = collected[:MAX_ITEMS]
 
-    message = build_message(items)
+    message = build_message(items, default_emoji, rules)
     if len(message) > 3800:
         message = message[:3800] + "\n…"
 
