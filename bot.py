@@ -89,8 +89,7 @@ def load_emoji_rules():
                 {
                     "emoji": emoji,
                     "keywords": [
-                        k.lower() for k in keywords
-                        if isinstance(k, str) and k.strip()
+                        k.lower() for k in keywords if isinstance(k, str) and k.strip()
                     ],
                 }
             )
@@ -123,6 +122,7 @@ def domain_of(url):
 def local_now():
     try:
         from zoneinfo import ZoneInfo
+
         return datetime.now(ZoneInfo(TIMEZONE))
     except Exception:
         return datetime.now(timezone.utc).astimezone()
@@ -156,7 +156,7 @@ def send_message(text):
         "chat_id": CHAT_ID,
         "text": text,
         "parse_mode": "HTML",
-        "disable_web_page_preview": True
+        "disable_web_page_preview": True,
     }
     r = requests.post(url, json=payload, timeout=30)
     if not r.ok:
@@ -205,12 +205,69 @@ def main():
                 if not title or not link:
                     continue
 
-                cat_candidates.append({
-                    "id": eid,
-                    "title": title,
-                    "link": link,
-                    "ts": entry_ts(e)
-                })
+                cat_candidates.append(
+                    {
+                        "id": eid,
+                        "title": title,
+                        "link": link,
+                        "ts": entry_ts(e),
+                    }
+                )
                 taken += 1
 
+        # ✅ FIX: this block must be indented
         if not cat_candidates:
+            grouped_items.append((cat["name"], []))
+            continue
+
+        cat_candidates.sort(key=lambda x: x["ts"], reverse=True)
+        selected = cat_candidates[: cat["limit"]]
+
+        for it in selected:
+            all_selected.append(it)
+            all_selected_ids.add(it["id"])
+
+        grouped_items.append((cat["name"], selected))
+
+    if not all_selected:
+        return
+
+    # Enforce MAX_ITEMS across all categories (keeps category order)
+    if len(all_selected) > MAX_ITEMS:
+        kept_ids = set()
+        trimmed_grouped = []
+        count = 0
+
+        for cat_name, items in grouped_items:
+            new_items = []
+            for it in items:
+                if count >= MAX_ITEMS:
+                    break
+                if it["id"] in kept_ids:
+                    continue
+                new_items.append(it)
+                kept_ids.add(it["id"])
+                count += 1
+
+            trimmed_grouped.append((cat_name, new_items))
+            if count >= MAX_ITEMS:
+                break
+
+        grouped_items = trimmed_grouped
+        all_selected = [it for _, items in grouped_items for it in items]
+
+    message = build_message(grouped_items, default_emoji, rules)
+    if len(message) > 3800:
+        message = message[:3800] + "\n…"
+
+    send_message(message)
+
+    for it in all_selected:
+        posted.add(it["id"])
+
+    state["posted_ids"] = list(posted)[-2000:]
+    save_state(state)
+
+
+if __name__ == "__main__":
+    main()
