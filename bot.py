@@ -18,23 +18,48 @@ MAX_ITEMS = int(os.getenv("MAX_ITEMS", "10"))
 TIMEZONE = os.getenv("TIMEZONE", "Europe/Chisinau")
 PER_SOURCE_LIMIT = int(os.getenv("PER_SOURCE_LIMIT", "2"))
 
+# -------------------------
+# Routing rules (simple keywords -> target category)
+# Adjust keywords anytime.
+# -------------------------
+ROUTING_RULES = [
+    {
+        "keywords": ["cve-", "zero-day", "0-day", "exploit", "poc"],
+        "target": "🛠️ Critical Vulnerabilities",
+    },
+    {
+        "keywords": ["phishing", "scam", "fraud", "spoof"],
+        "target": "🚨 Breaking & Incidents",
+    },
+    {
+        "keywords": ["apt", "malware", "botnet", "campaign"],
+        "target": "🧠 Threat Intelligence",
+    },
+]
+
 
 # =========================
 # CONFIG LOADERS
 # =========================
 
 def load_feeds_config():
+    """
+    Supports your feeds.json format:
+    {
+      "categories": {
+        "Name": { "limit": X, "feeds": [...] },
+        ...
+      }
+    }
+    """
     with open(FEEDS_FILE, "r", encoding="utf-8") as f:
         data = json.load(f)
 
     cats = data.get("categories", {})
     cleaned = []
 
-    # EXPECTED FORMAT:
-    # "categories": {
-    #   "Category Name": { "limit": X, "feeds": [...] }
-    # }
     if isinstance(cats, dict):
+        # dict preserves insertion order in Python 3.7+
         for name, cfg in cats.items():
             if not isinstance(cfg, dict):
                 continue
@@ -47,11 +72,7 @@ def load_feeds_config():
             if not cat_name or limit <= 0 or not feeds:
                 continue
 
-            cleaned.append({
-                "name": cat_name,
-                "limit": limit,
-                "feeds": feeds
-            })
+            cleaned.append({"name": cat_name, "limit": limit, "feeds": feeds})
 
     return cleaned
 
@@ -82,10 +103,14 @@ def load_emoji_rules():
             emoji = r.get("emoji")
             keywords = r.get("keywords", [])
             if emoji and isinstance(keywords, list):
-                rules.append({
-                    "emoji": emoji,
-                    "keywords": [k.lower() for k in keywords if isinstance(k, str) and k.strip()]
-                })
+                rules.append(
+                    {
+                        "emoji": emoji,
+                        "keywords": [
+                            k.lower() for k in keywords if isinstance(k, str) and k.strip()
+                        ],
+                    }
+                )
     except Exception:
         pass
 
@@ -121,6 +146,21 @@ def detect_emoji(title, default, rules):
     return default
 
 
+def route_category(title, current_category, known_categories):
+    """
+    Simple routing: if title contains keywords, move to target category.
+    Only routes to categories that exist in feeds.json (known_categories).
+    """
+    t = (title or "").lower()
+    for rule in ROUTING_RULES:
+        target = rule.get("target")
+        if target and target in known_categories:
+            for kw in rule.get("keywords", []):
+                if kw and kw in t:
+                    return target
+    return current_category
+
+
 def html_escape(s):
     return (s or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
@@ -149,12 +189,21 @@ def build_message(grouped_items, default_emoji, rules):
     header = f"🗞️ <b>IT Moldova</b>\n<i>Buletin {now:%d.%m.%Y %H:%M}</i>\n\n"
 
     sections = []
-    for cat_name, items in grouped_items:
+
+    for cat in grouped_items:
+        cat_name = cat["name"]
+        limit = cat["limit"]
+        items = cat["items"]
+
         if not items:
             continue
 
-        lines = [f"<b>{html_escape(cat_name)}</b>"]
-        for it in items:
+        lines = [
+            f"<b>{html_escape(cat_name)}</b>",
+            "────────"
+        ]
+
+        for it in items[:limit]:
             emoji = detect_emoji(it["title"], default_emoji, rules)
             title = html_escape(it["title"])
             link = it["link"]
@@ -172,7 +221,7 @@ def send_message(text):
         "chat_id": CHAT_ID,
         "text": text,
         "parse_mode": "HTML",
-        "disable_web_page_preview": True
+        "disable_web_page_preview": True,
     }
     r = requests.post(url, json=payload, timeout=30)
     if not r.ok:
@@ -195,12 +244,15 @@ def main():
     if not categories:
         return
 
+    known_categories = {c["name"] for c in categories}
+
     default_emoji, rules = load_emoji_rules()
+
     state = load_state()
     posted = set(state.get("posted_ids", []))
 
-    grouped_items = []
-    all_selected = []
+    # Collect routed items globally, then regroup by target category
+    routed_items = []
     all_selected_ids = set()
 
     for cat in categories:
@@ -223,28 +275,75 @@ def main():
                 if not title or not link:
                     continue
 
-                candidates.append({
-                    "id": eid,
-                    "title": title,
-                    "link": link,
-                    "ts": entry_ts(e)
-                })
+                candidates.append(
+                    {
+                        "id": eid,
+                        "title": title,
+                        "link": link,
+                        "ts": entry_ts(e),
+                        "source_category": cat["name"],
+                    }
+                )
                 taken += 1
 
         if not candidates:
-            grouped_items.append((cat["name"], []))
             continue
 
         candidates.sort(key=lambda x: x["ts"], reverse=True)
-        selected = candidates[:cat["limit"]]
+
+        # Take up to category limit from this category's feeds (before routing)
+        selected = candidates[: cat["limit"]]
 
         for it in selected:
-            all_selected.append(it)
+            it["category"] = route_category(it["title"], it["source_category"], known_categories)
+            routed_items.append(it)
             all_selected_ids.add(it["id"])
 
-        grouped_items.append((cat["name"], selected))
+    if not routed_items:
+        return
 
-    if not all_selected:
+    # Regroup by routed category, keep category order from feeds.json
+    cat_map = {c["name"]: {"name": c["name"], "limit": c["limit"], "items": []} for c in categories}
+    for it in routed_items:
+        target = it.get("category") or it.get("source_category")
+        if target not in cat_map:
+            target = it.get("source_category")
+        cat_map[target]["items"].append(it)
+
+    # Sort items inside each category by time desc
+    for c in categories:
+        cat_map[c["name"]]["items"].sort(key=lambda x: x.get("ts", 0), reverse=True)
+
+    # Enforce MAX_ITEMS globally while preserving category order and per-category limits
+    grouped_items = []
+    total = 0
+    kept = []
+
+    for c in categories:
+        name = c["name"]
+        limit = c["limit"]
+        items = cat_map[name]["items"]
+
+        if not items:
+            grouped_items.append({"name": name, "limit": limit, "items": []})
+            continue
+
+        allowed = []
+        for it in items:
+            if total >= MAX_ITEMS:
+                break
+            if len(allowed) >= limit:
+                break
+            allowed.append(it)
+            kept.append(it)
+            total += 1
+
+        grouped_items.append({"name": name, "limit": limit, "items": allowed})
+
+        if total >= MAX_ITEMS:
+            break
+
+    if not kept:
         return
 
     message = build_message(grouped_items, default_emoji, rules)
@@ -253,7 +352,7 @@ def main():
 
     send_message(message)
 
-    for it in all_selected:
+    for it in kept:
         posted.add(it["id"])
 
     state["posted_ids"] = list(posted)[-2000:]
