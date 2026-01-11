@@ -21,7 +21,7 @@ CHAT_ID = os.getenv("CHAT_ID")
 MAX_ITEMS = 25
 PER_SOURCE_LIMIT = 5
 TIMEZONE = "Europe/Chisinau"
-MAX_AGE_HOURS = 24
+MAX_AGE_HOURS = 72
 
 # =====================
 # HELPERS
