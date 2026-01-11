@@ -1,0 +1,13 @@
+{
+  "default": "📰",
+  "rules": [
+    { "emoji": "🚨", "keywords": ["critical", "zero-day", "0day", "actively exploited", "emergency", "urgent"] },
+    { "emoji": "🦠", "keywords": ["ransomware", "malware", "trojan", "worm", "botnet", "stealer"] },
+    { "emoji": "🎣", "keywords": ["phishing", "scam", "fraud", "spoof", "impersonation"] },
+    { "emoji": "🔓", "keywords": ["breach", "leak", "exposed", "stolen", "data stolen"] },
+    { "emoji": "🔐", "keywords": ["password", "authentication", "auth", "login", "2fa", "mfa", "passkey", "encryption"] },
+    { "emoji": "🛠️", "keywords": ["patch", "update", "fixed", "mitigation", "released", "security update"] },
+    { "emoji": "🏢", "keywords": ["microsoft", "google", "apple", "vmware", "cisco", "fortinet", "palo alto", "crowdstrike"] },
+    { "emoji": "💻", "keywords": ["windows", "linux", "server", "cloud", "vm", "infrastructure", "endpoint"] }
+  ]
+}
